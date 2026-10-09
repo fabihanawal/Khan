@@ -23,6 +23,27 @@ export const Footer: React.FC<FooterProps> = ({
   const currentHotline = siteSettings?.hotline || BADALGACHI_HOTLINE;
   const currentAddress = siteSettings?.shopAddress || SHOP_LOCATION_BN;
   const currentWhatsApp = siteSettings?.whatsapp || BADALGACHI_WHATSAPP;
+
+  // Secret 3-tap on English "khan enterprise" text to open Admin Password modal
+  const tapCountRef = React.useRef(0);
+  const tapTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  const handleSecretTripleTap = () => {
+    tapCountRef.current += 1;
+    if (tapTimerRef.current) {
+      clearTimeout(tapTimerRef.current);
+    }
+
+    if (tapCountRef.current >= 3) {
+      tapCountRef.current = 0;
+      onOpenAdmin();
+    } else {
+      tapTimerRef.current = setTimeout(() => {
+        tapCountRef.current = 0;
+      }, 1500); // 1.5 seconds window for 3 taps
+    }
+  };
+
   return (
     <footer className="bg-stone-900 text-stone-300 pt-12 pb-8 border-t border-stone-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
@@ -165,22 +186,6 @@ export const Footer: React.FC<FooterProps> = ({
                 <Bot className="w-3.5 h-3.5 text-amber-400" />
                 <span>AI শস্য ডাক্তার</span>
               </button>
-
-              <button
-                onClick={onOpenSheetGuide}
-                className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-lg font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-                <span>গুগল শীট গাইড</span>
-              </button>
-
-              <button
-                onClick={onOpenAdmin}
-                className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-lg font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <Lock className="w-3.5 h-3.5 text-amber-400" />
-                <span>অর্ডার ড্যাশবোর্ড</span>
-              </button>
             </div>
           </div>
 
@@ -188,7 +193,17 @@ export const Footer: React.FC<FooterProps> = ({
 
         {/* Copyright & Disclaimer */}
         <div className="pt-6 border-t border-stone-800 text-center text-[11px] text-stone-500 space-y-1">
-          <p>© {new Date().getFullYear()} খান ইনটারপ্রাইজ (Khan Enterprise) • সর্বস্বত্ব সংরক্ষিত।</p>
+          <p>
+            © {new Date().getFullYear()} খান এন্টারপ্রাইজ (
+            <span
+              onClick={handleSecretTripleTap}
+              className="cursor-pointer select-none text-stone-400 hover:text-stone-300 active:scale-95 transition-all inline-block px-0.5 font-medium"
+              title="khan enterprise"
+            >
+              khan enterprise
+            </span>
+            ) • সর্বস্বত্ব সংরক্ষিত।
+          </p>
           <p>বদলগাছী উপজেলা কৃষি সম্প্রসারণ অধিদপ্তর অনুমোদিত ডিলার ও খুচরা বিক্রেতা।</p>
         </div>
 

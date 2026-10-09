@@ -30,6 +30,12 @@ export const FreeAdviceSection: React.FC<FreeAdviceSectionProps> = ({
       return;
     }
 
+    const cleanPhone = phone.replace(/[^0-9]/g, '');
+    if (!/^01[3-9]\d{8}$/.test(cleanPhone)) {
+      setError('অনুগ্রহ করে সঠিক ১১ ডিজিটের মোবাইল নম্বর দিন (যেমন: 017XXXXXXXX, 018XXXXXXXX)।');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {

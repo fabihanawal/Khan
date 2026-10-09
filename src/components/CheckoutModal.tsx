@@ -54,13 +54,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
 
     const cleanPhone = formData.phone.replace(/[^0-9]/g, '');
-    if (cleanPhone.length < 11) {
-      setErrorMessage('অনুগ্রহ করে সঠিক ১১ ডিজিটের মোবাইল নম্বর দিন (যেমন: 017XXXXXXXX)।');
+    if (!/^01[3-9]\d{8}$/.test(cleanPhone)) {
+      setErrorMessage('অনুগ্রহ করে সঠিক ১১ ডিজিটের বাংলাদেশি মোবাইল নম্বর দিন (যেমন: 017XXXXXXXX, 018XXXXXXXX, 019XXXXXXXX)।');
       return;
     }
 
     if (!formData.villageAddress.trim()) {
       setErrorMessage('অনুগ্রহ করে আপনার গ্রাম বা বিস্তারিত ঠিকানা লিখুন।');
+      return;
+    }
+
+    if (cartItems.length === 0) {
+      setErrorMessage('আপনার কার্ট খালি! অনুগ্রহ করে প্রথমে পণ্য যোগ করুন।');
       return;
     }
 

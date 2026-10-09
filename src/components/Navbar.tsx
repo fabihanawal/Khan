@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShoppingCart, PhoneCall, Bot, ShieldCheck, Search, Menu, X, FileSpreadsheet, LayoutDashboard, MapPin } from 'lucide-react';
+import { ShoppingCart, PhoneCall, Bot, ShieldCheck, Search, Menu, X, FileSpreadsheet, MapPin } from 'lucide-react';
 import { BADALGACHI_HOTLINE, BADALGACHI_UNIONS } from '../data/unions';
 import { SiteSettings } from '../types';
 
@@ -55,15 +55,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
 
             <div className="flex items-center gap-4 text-xs font-medium ml-auto">
-              <button
-                onClick={onOpenSheetGuide}
-                className="flex items-center gap-1 text-emerald-200 hover:text-white transition-colors cursor-pointer"
-                title="গুগল স্প্রেডশীট সংযোগ গাইড"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline">গুগল শীট ডাটাবেজ</span>
-              </button>
-
               <a
                 href={`tel:${currentHotline}`}
                 className="flex items-center gap-1.5 font-bold text-amber-300 hover:text-amber-200 transition-colors"
@@ -134,16 +125,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <Bot className="w-4 h-4 text-emerald-600 animate-pulse" />
               <span>ফ্রী কৃষি পরামর্শ (AI)</span>
-            </button>
-
-            {/* Admin / Staff Portal Button */}
-            <button
-              onClick={onOpenAdmin}
-              className="flex items-center gap-1 px-2.5 sm:px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-300 text-xs sm:text-sm font-medium transition-colors cursor-pointer"
-              title="অর্ডার কন্ট্রোল প্যানেল"
-            >
-              <LayoutDashboard className="w-4 h-4 text-stone-600" />
-              <span className="hidden md:inline">অর্ডার ড্যাশবোর্ড</span>
             </button>
 
             {/* Shopping Cart Button */}

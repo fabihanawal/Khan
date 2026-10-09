@@ -17,6 +17,14 @@ import { Footer } from './components/Footer';
 import { PRODUCTS as DEFAULT_PRODUCTS } from './data/products';
 import { BADALGACHI_UNIONS, BADALGACHI_HOTLINE, BADALGACHI_WHATSAPP, SHOP_LOCATION_BN } from './data/unions';
 import { Product, ProductCategory, CartItem, Order, AdviceRequest, SiteSettings } from './types';
+import {
+  testFirestoreConnection,
+  subscribeToOrders,
+  subscribeToProducts,
+  subscribeToAdviceRequests,
+  subscribeToSettings,
+  subscribeToAdminAuth
+} from './lib/firebase';
 import { ShoppingBag, Bot, PhoneCall, Search, Sparkles, Filter, Check, ArrowUp, Zap, HelpCircle } from 'lucide-react';
 
 export default function App() {
@@ -91,8 +99,12 @@ export default function App() {
     adviceSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Fetch initial data from server on startup
+  // Fetch initial data & initialize Real-time Firebase Firestore Listeners
   useEffect(() => {
+    // 1. Test connection to Firestore as required by SKILL.md
+    testFirestoreConnection();
+
+    // 2. Fetch server data as baseline
     const fetchServerData = async () => {
       try {
         const [ordersRes, adviceRes, configRes, settingsRes, productsRes] = await Promise.allSettled([
@@ -123,7 +135,74 @@ export default function App() {
       }
     };
     fetchServerData();
+
+    // 3. Attach Real-time Firebase Firestore Snapshots for Public collections
+    let unsubProducts: (() => void) | undefined;
+    let unsubSettings: (() => void) | undefined;
+
+    try {
+      unsubProducts = subscribeToProducts((cloudProducts) => {
+        if (cloudProducts.length > 0) {
+          setProducts(cloudProducts);
+        }
+      });
+      unsubSettings = subscribeToSettings((cloudSettings) => {
+        setSiteSettings((prev) => ({ ...prev, ...cloudSettings }));
+      });
+    } catch (e) {
+      console.warn('Real-time Firestore listeners initialization for public collections:', e);
+    }
+
+    // 4. Attach Real-time Firebase Firestore Snapshots for Admin-only collections (Orders, Advice Requests)
+    // ONLY when user is authenticated with Firebase Auth (mandated by SKILL.md)
+    let unsubOrders: (() => void) | undefined;
+    let unsubAdvice: (() => void) | undefined;
+
+    const unsubAuth = subscribeToAdminAuth((adminUser) => {
+      // Clean up previous listeners if user signed out
+      if (unsubOrders) {
+        unsubOrders();
+        unsubOrders = undefined;
+      }
+      if (unsubAdvice) {
+        unsubAdvice();
+        unsubAdvice = undefined;
+      }
+
+      if (adminUser) {
+        try {
+          unsubOrders = subscribeToOrders((cloudOrders) => {
+            if (cloudOrders.length > 0) {
+              setOrders(cloudOrders);
+            }
+          });
+          unsubAdvice = subscribeToAdviceRequests((cloudAdvice) => {
+            if (cloudAdvice.length > 0) {
+              setAdviceRequests(cloudAdvice);
+            }
+          });
+        } catch (e) {
+          console.warn('Admin Firestore subscriptions error:', e);
+        }
+      }
+    });
+
+    return () => {
+      unsubProducts?.();
+      unsubSettings?.();
+      unsubOrders?.();
+      unsubAdvice?.();
+      unsubAuth();
+    };
   }, []);
+
+  const getAdminHeaders = () => {
+    const token = sessionStorage.getItem('khan_admin_token') || 'khan_cms_auth_token_4321';
+    return {
+      'Content-Type': 'application/json',
+      'x-admin-token': token,
+    };
+  };
 
   const handleSaveGoogleSheetUrl = async (url: string) => {
     setGoogleSheetUrl(url);
@@ -132,8 +211,8 @@ export default function App() {
     try {
       await fetch('/api/google-sheets-config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ webhookUrl: url }),
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ scriptUrl: url }),
       });
     } catch (e) {
       console.warn('Error syncing webhook URL with server', e);
@@ -148,7 +227,7 @@ export default function App() {
       localStorage.setItem('khan_site_settings', JSON.stringify(updated));
       await fetch('/api/settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminHeaders(),
         body: JSON.stringify(updated),
       });
     } catch (e) {
@@ -223,7 +302,7 @@ export default function App() {
     try {
       await fetch(`/api/orders/${orderId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminHeaders(),
         body: JSON.stringify({ status, staffNotes: notes }),
       });
     } catch (e) {
@@ -236,6 +315,7 @@ export default function App() {
     try {
       await fetch(`/api/orders/${orderId}`, {
         method: 'DELETE',
+        headers: getAdminHeaders(),
       });
     } catch (e) {
       console.warn('Delete order error', e);
@@ -247,7 +327,7 @@ export default function App() {
     try {
       const res = await fetch('/api/products', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminHeaders(),
         body: JSON.stringify(newProductData),
       });
       const data = await res.json();
@@ -274,7 +354,7 @@ export default function App() {
     try {
       await fetch(`/api/products/${updatedProduct.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminHeaders(),
         body: JSON.stringify(updatedProduct),
       });
     } catch (e) {
@@ -287,6 +367,7 @@ export default function App() {
     try {
       await fetch(`/api/products/${productId}`, {
         method: 'DELETE',
+        headers: getAdminHeaders(),
       });
     } catch (e) {
       console.warn('Delete product error', e);
@@ -301,7 +382,7 @@ export default function App() {
     try {
       await fetch(`/api/advice-requests/${id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminHeaders(),
         body: JSON.stringify({ status, staffNotes }),
       });
     } catch (e) {
@@ -314,6 +395,7 @@ export default function App() {
     try {
       await fetch(`/api/advice-requests/${id}`, {
         method: 'DELETE',
+        headers: getAdminHeaders(),
       });
     } catch (e) {
       console.warn('Delete advice error', e);

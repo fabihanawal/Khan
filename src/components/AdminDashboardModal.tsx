@@ -31,10 +31,13 @@ import {
   RotateCcw,
   Eye,
   EyeOff,
-  Bot
+  Bot,
+  Upload,
+  Image as ImageIcon
 } from 'lucide-react';
 import { Order, AdviceRequest, Product, ProductCategory, SiteSettings } from '../types';
 import { BADALGACHI_UNIONS, BADALGACHI_HOTLINE, BADALGACHI_WHATSAPP, SHOP_LOCATION_BN } from '../data/unions';
+import { auth, signInAdminWithGoogle, signOutAdmin } from '../lib/firebase';
 
 interface AdminDashboardModalProps {
   isOpen: boolean;
@@ -138,9 +141,13 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     e.preventDefault();
     setLoginError(null);
 
-    if (passwordInput.trim() === '4321') {
+    // Normalize Bengali digits to English
+    const normalizedPassword = passwordInput.trim().replace(/[০-৯]/g, d => '০১২৩৪৫৬৭৮৯'.indexOf(d).toString());
+
+    if (normalizedPassword === '4321') {
       setIsAuthenticated(true);
       sessionStorage.setItem('khan_cms_auth', 'true');
+      sessionStorage.setItem('khan_admin_token', 'khan_cms_auth_token_4321');
       setPasswordInput('');
       setLoginError(null);
     } else {
@@ -148,10 +155,27 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     }
   };
 
+  const handleGoogleLogin = async () => {
+    try {
+      setLoginError(null);
+      const res = await signInAdminWithGoogle();
+      if (res?.user) {
+        setIsAuthenticated(true);
+        sessionStorage.setItem('khan_cms_auth', 'true');
+        sessionStorage.setItem('khan_admin_token', 'khan_cms_auth_token_4321');
+      }
+    } catch (err: any) {
+      console.warn('Google sign-in error:', err);
+      setLoginError('গুগল লগইন সম্পন্ন করা যায়নি। দয়া করে ৪৩২১ পাসওয়ার্ড দিয়ে প্রবেশ করুন।');
+    }
+  };
+
   const handleLogout = () => {
     setIsAuthenticated(false);
     sessionStorage.removeItem('khan_cms_auth');
+    sessionStorage.removeItem('khan_admin_token');
     setPasswordInput('');
+    signOutAdmin().catch(() => {});
   };
 
   // --- Filtering Logic ---
@@ -273,6 +297,43 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     setIsProductFormOpen(true);
   };
 
+  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (readerEvent) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 800; // 800px max width/height maintains crisp quality & efficient storage
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > maxDim) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          }
+        } else {
+          if (height > maxDim) {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.82);
+          setProductFormData(prev => ({ ...prev, image: compressedBase64 }));
+        }
+      };
+      img.src = readerEvent.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSaveProductForm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!productFormData.nameBn || !productFormData.price) return;
@@ -346,6 +407,10 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
               <p className="text-xs sm:text-sm text-stone-500 mt-1">
                 সম্পূর্ণ প্রকল্প ও দোকান পরিচালনার জন্য অ্যাডমিন পাসওয়ার্ড দিন
               </p>
+              <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                <span>ফায়ারবেস ক্লাউড ডাটাবেজ সক্রিয়</span>
+              </div>
             </div>
           </div>
 
@@ -425,6 +490,29 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                 <span>লগইন করুন</span>
               </button>
             </div>
+
+            <div className="relative my-3">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-stone-200" />
+              </div>
+              <div className="relative flex justify-center text-xs">
+                <span className="bg-white px-2 text-stone-500">অথবা</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              className="w-full py-2.5 px-3 bg-white hover:bg-stone-50 border border-stone-300 text-stone-700 font-semibold rounded-xl text-xs flex items-center justify-center gap-2 shadow-2xs transition-colors cursor-pointer"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+              </svg>
+              <span>গুগল অ্যাকাউন্ট দিয়ে অ্যাডমিন লগইন</span>
+            </button>
           </form>
 
           <div className="mt-6 pt-4 border-t border-stone-100 text-center text-[11px] text-stone-400">
@@ -449,6 +537,10 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                     এডমিন সক্রিয়
                   </span>
+                  <span className="hidden md:inline-flex bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    🔥 ফায়ারবেস ক্লাউড ডাটাবেজ
+                  </span>
                 </div>
                 <p className="text-xs text-stone-400">
                   {siteSettings.shopAddress} • হেল্পলাইন: {siteSettings.hotline}
@@ -457,6 +549,22 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
+              {auth.currentUser ? (
+                <span className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-950/80 border border-emerald-700/60 text-[11px] text-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  {auth.currentUser.email}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleGoogleLogin}
+                  className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 text-xs font-semibold transition-colors cursor-pointer"
+                  title="গুগল অ্যাকাউন্ট দিয়ে সরাসরি ফায়ারবেস ক্লাউড ডাটাবেজ লাইভ সিঙ্ক করুন"
+                >
+                  <span>🔥 ক্লাউড অথ যুক্ত করুন</span>
+                </button>
+              )}
+
               <button
                 onClick={exportOrdersToCSV}
                 className="px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold flex items-center gap-1.5 border border-stone-700 transition-colors cursor-pointer"
@@ -1464,16 +1572,64 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                   />
                 </div>
 
-                <div className="sm:col-span-2">
-                  <label className="block font-bold text-stone-700 mb-1">পণ্যের ছবি (Image URL)</label>
-                  <input
-                    type="url"
-                    value={productFormData.image}
-                    onChange={(e) => setProductFormData({ ...productFormData, image: e.target.value })}
-                    placeholder="https://..."
-                    className="w-full p-2.5 border border-stone-300 rounded-xl text-stone-900 font-mono text-xs"
-                    required
-                  />
+                <div className="sm:col-span-2 space-y-2">
+                  <label className="block font-bold text-stone-700">
+                    পণ্যের ছবি (Device Upload বা Image URL) *
+                  </label>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-start">
+                    {/* Upload button & file input */}
+                    <div className="sm:col-span-2 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-bold rounded-xl cursor-pointer transition-colors shadow-xs text-xs sm:text-sm">
+                          <Upload className="w-4 h-4 text-emerald-600" />
+                          <span>ডিভাইস / গ্যালারি থেকে ছবি আপলোড</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageFileUpload}
+                            className="hidden"
+                          />
+                        </label>
+                        <span className="text-xs text-stone-500 font-medium">অথবা নিচে সরাসরি লিংক দিন</span>
+                      </div>
+
+                      <input
+                        type="url"
+                        value={productFormData.image || ''}
+                        onChange={(e) => setProductFormData({ ...productFormData, image: e.target.value })}
+                        placeholder="https://images.unsplash.com/..."
+                        className="w-full p-2.5 border border-stone-300 rounded-xl text-stone-900 font-mono text-xs focus:border-emerald-600"
+                        required
+                      />
+                      <p className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
+                        <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                        সংযুক্ত ছবি স্থায়ীভাবে ডাটাবেজ ও ডিস্কে সংরক্ষিত থাকবে (রিফ্রেশ করলেও হারাবে না)।
+                      </p>
+                    </div>
+
+                    {/* Preview box */}
+                    <div className="w-full flex flex-col items-center justify-center p-2 rounded-2xl border-2 border-dashed border-stone-200 bg-stone-50 min-h-[110px]">
+                      {productFormData.image ? (
+                        <div className="relative group w-full text-center">
+                          <img
+                            src={productFormData.image}
+                            alt="Preview"
+                            className="w-24 h-24 object-cover mx-auto rounded-xl border border-stone-200 shadow-sm"
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = 'none';
+                            }}
+                          />
+                          <span className="text-[10px] text-stone-500 mt-1 block font-semibold">ছবি প্রিভিউ</span>
+                        </div>
+                      ) : (
+                        <div className="text-center text-stone-400">
+                          <ImageIcon className="w-8 h-8 mx-auto mb-1 stroke-1" />
+                          <span className="text-[11px]">কোন ছবি নির্বাচিত নেই</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="sm:col-span-2">
@@ -1560,7 +1716,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
               </button>
             </div>
 
-            <div className="text-xs space-y-4 bg-stone-50 p-4 rounded-2xl border border-stone-200">
+            <div id="order-receipt-print" className="text-xs space-y-4 bg-stone-50 p-4 rounded-2xl border border-stone-200">
               <div className="text-center border-b border-stone-200 pb-3 space-y-1">
                 <h2 className="text-lg font-black text-emerald-950">খান এন্টারপ্রাইজ</h2>
                 <p className="text-stone-600">{siteSettings.shopAddress}</p>

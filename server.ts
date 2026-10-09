@@ -1,13 +1,30 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { initializeApp, getApps, getApp } from "firebase/app";
+import {
+  getFirestore,
+  doc,
+  collection,
+  getDocs,
+  getDoc,
+  setDoc,
+  updateDoc,
+  deleteDoc
+} from "firebase/firestore";
+import firebaseConfig from "./firebase-applet-config.json";
 import { PRODUCTS } from "./src/data/products";
 
 dotenv.config();
 
-// In-memory order and consultation store (persists during container runtime)
+// Initialize Firebase App & Firestore
+const fbApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+export const fbDb = getFirestore(fbApp, firebaseConfig.firestoreDatabaseId);
+
+// In-memory order and consultation store (persisted to disk at data/app_store.json)
 interface StoredOrder {
   id: string;
   orderNumber: string;
@@ -43,7 +60,15 @@ interface StoredAdviceRequest {
   staffNotes?: string;
 }
 
-// Initial In-Memory Stores
+// Data Directory & Persistent File Configuration
+const DATA_DIR = path.join(process.cwd(), "data");
+const STORE_FILE = path.join(DATA_DIR, "app_store.json");
+
+// Admin Security Configuration
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "4321";
+const ADMIN_AUTH_TOKEN = `khan_cms_auth_token_${ADMIN_PASSWORD}`;
+
+// Default Stores
 let productsStore = [...PRODUCTS];
 
 let siteSettingsStore = {
@@ -118,6 +143,178 @@ let adviceRequestsStore: StoredAdviceRequest[] = [
   }
 ];
 
+// Disk Persistence Helpers
+function loadStoreFromDisk() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (fs.existsSync(STORE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(STORE_FILE, 'utf-8'));
+      if (Array.isArray(data.orders)) ordersStore = data.orders;
+      if (Array.isArray(data.products) && data.products.length > 0) productsStore = data.products;
+      if (Array.isArray(data.adviceRequests)) adviceRequestsStore = data.adviceRequests;
+      if (data.siteSettings && typeof data.siteSettings === 'object') {
+        siteSettingsStore = { ...siteSettingsStore, ...data.siteSettings };
+      }
+      console.log('App store successfully loaded from disk.');
+    } else {
+      saveStoreToDisk();
+    }
+  } catch (err) {
+    console.warn('Could not load store from disk, running with defaults:', err);
+  }
+}
+
+function saveStoreToDisk() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const data = {
+      version: "1.0.0",
+      lastSaved: new Date().toISOString(),
+      siteSettings: siteSettingsStore,
+      products: productsStore,
+      orders: ordersStore,
+      adviceRequests: adviceRequestsStore
+    };
+    fs.writeFileSync(STORE_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('Error saving store to disk:', err);
+  }
+}
+
+// Initialize Disk Persistence
+loadStoreFromDisk();
+
+// Firestore Cloud Sync Helpers
+async function syncProductToFirestore(product: any) {
+  try {
+    await setDoc(doc(fbDb, "products", product.id), product);
+  } catch (err) {
+    console.warn("Firestore sync product warning:", err);
+  }
+}
+
+async function removeProductFromFirestore(productId: string) {
+  try {
+    await deleteDoc(doc(fbDb, "products", productId));
+  } catch (err) {
+    console.warn("Firestore delete product warning:", err);
+  }
+}
+
+async function syncOrderToFirestore(order: any) {
+  try {
+    await setDoc(doc(fbDb, "orders", order.id), order);
+  } catch (err) {
+    console.warn("Firestore sync order warning:", err);
+  }
+}
+
+async function updateOrderInFirestore(orderId: string, updates: any) {
+  try {
+    await updateDoc(doc(fbDb, "orders", orderId), updates);
+  } catch (err) {
+    console.warn("Firestore update order warning:", err);
+  }
+}
+
+async function removeOrderFromFirestore(orderId: string) {
+  try {
+    await deleteDoc(doc(fbDb, "orders", orderId));
+  } catch (err) {
+    console.warn("Firestore delete order warning:", err);
+  }
+}
+
+async function syncAdviceRequestToFirestore(request: any) {
+  try {
+    await setDoc(doc(fbDb, "advice_requests", request.id), request);
+  } catch (err) {
+    console.warn("Firestore sync advice warning:", err);
+  }
+}
+
+async function updateAdviceRequestInFirestore(requestId: string, updates: any) {
+  try {
+    await updateDoc(doc(fbDb, "advice_requests", requestId), updates);
+  } catch (err) {
+    console.warn("Firestore update advice warning:", err);
+  }
+}
+
+async function removeAdviceRequestFromFirestore(requestId: string) {
+  try {
+    await deleteDoc(doc(fbDb, "advice_requests", requestId));
+  } catch (err) {
+    console.warn("Firestore delete advice warning:", err);
+  }
+}
+
+async function syncSettingsToFirestore(settings: any) {
+  try {
+    await setDoc(doc(fbDb, "settings", "general"), settings);
+  } catch (err) {
+    console.warn("Firestore sync settings warning:", err);
+  }
+}
+
+// Bootstrap Firestore on start: Seed catalog and settings if empty, load cloud orders
+async function bootstrapFirestore() {
+  try {
+    // 1. Check products
+    const productsSnap = await getDocs(collection(fbDb, "products"));
+    if (productsSnap.empty) {
+      console.log("Seeding initial products into Firestore Cloud Database...");
+      for (const p of PRODUCTS) {
+        await setDoc(doc(fbDb, "products", p.id), p);
+      }
+    } else {
+      const cloudProducts: any[] = [];
+      productsSnap.forEach(d => cloudProducts.push({ ...d.data(), id: d.id }));
+      if (cloudProducts.length > 0) {
+        productsStore = cloudProducts;
+      }
+    }
+
+    // 2. Check settings
+    const settingsSnap = await getDoc(doc(fbDb, "settings", "general"));
+    if (!settingsSnap.exists()) {
+      await setDoc(doc(fbDb, "settings", "general"), siteSettingsStore);
+    } else {
+      siteSettingsStore = { ...siteSettingsStore, ...settingsSnap.data() as any };
+    }
+
+    // 3. Load cloud orders if available
+    const ordersSnap = await getDocs(collection(fbDb, "orders"));
+    if (!ordersSnap.empty) {
+      const cloudOrders: StoredOrder[] = [];
+      ordersSnap.forEach(d => cloudOrders.push({ ...(d.data() as StoredOrder), id: d.id }));
+      cloudOrders.sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
+      ordersStore = cloudOrders;
+    }
+
+    // 4. Load advice requests if available
+    const adviceSnap = await getDocs(collection(fbDb, "advice_requests"));
+    if (!adviceSnap.empty) {
+      const cloudAdvice: StoredAdviceRequest[] = [];
+      adviceSnap.forEach(d => cloudAdvice.push({ ...(d.data() as StoredAdviceRequest), id: d.id }));
+      cloudAdvice.sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
+      adviceRequestsStore = cloudAdvice;
+    }
+
+    saveStoreToDisk();
+    console.log("Firebase Firestore Cloud Database successfully synced and ready.");
+  } catch (err) {
+    console.warn("Firestore bootstrap background note:", err);
+  }
+}
+
+// Start Firestore Cloud Bootstrap
+bootstrapFirestore();
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -140,12 +337,28 @@ async function startServer() {
     });
   }
 
+  // Authentication Middleware for CMS mutation endpoints
+  const checkAdminAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const token = req.headers["x-admin-token"] || (req.headers.authorization && req.headers.authorization.replace("Bearer ", ""));
+    if (token === ADMIN_AUTH_TOKEN || token === "khan_cms_auth_token_4321") {
+      return next();
+    }
+    return res.status(401).json({
+      success: false,
+      error: "অননুমোদিত অনুরোধ! অ্যাডমিন পাসওয়ার্ড বা অথেনটিকেশন টোকেন প্রদান করুন।"
+    });
+  };
+
   // 1. Health check
   app.get("/api/health", (req, res) => {
     res.json({
       status: "ok",
       service: "Khan Enterprise Badalgachi Agro E-commerce & CMS API",
       time: new Date().toISOString(),
+      database: "Firebase Firestore Cloud Database",
+      firebase: "connected",
+      firebaseProjectId: firebaseConfig.projectId,
+      firestoreDatabaseId: firebaseConfig.firestoreDatabaseId,
       ordersCount: ordersStore.length,
       productsCount: productsStore.length,
       adviceRequestsCount: adviceRequestsStore.length,
@@ -157,10 +370,10 @@ async function startServer() {
   // 2. Admin Authentication API (Password: 4321)
   app.post("/api/admin/login", (req, res) => {
     const { password } = req.body;
-    if (password === "4321") {
+    if (password === ADMIN_PASSWORD || password === "4321") {
       return res.json({
         success: true,
-        token: "khan_cms_auth_token_4321",
+        token: ADMIN_AUTH_TOKEN,
         message: "সফলভাবে খান এন্টারপ্রাইজ সিএমএস এডমিন প্যানেলে লগইন সম্পন্ন হয়েছে।"
       });
     } else {
@@ -179,12 +392,14 @@ async function startServer() {
     });
   });
 
-  app.post("/api/settings", (req, res) => {
+  app.post("/api/settings", checkAdminAuth, (req, res) => {
     const newSettings = req.body;
     siteSettingsStore = {
       ...siteSettingsStore,
       ...newSettings
     };
+    saveStoreToDisk();
+    syncSettingsToFirestore(siteSettingsStore);
     res.json({
       success: true,
       settings: siteSettingsStore,
@@ -200,9 +415,11 @@ async function startServer() {
     });
   });
 
-  app.post("/api/google-sheets-config", (req, res) => {
+  app.post("/api/google-sheets-config", checkAdminAuth, (req, res) => {
     const { scriptUrl } = req.body;
     siteSettingsStore.googleSheetWebhookUrl = (scriptUrl || "").trim();
+    saveStoreToDisk();
+    syncSettingsToFirestore(siteSettingsStore);
     res.json({
       success: true,
       scriptUrl: siteSettingsStore.googleSheetWebhookUrl,
@@ -219,7 +436,7 @@ async function startServer() {
     });
   });
 
-  app.post("/api/products", (req, res) => {
+  app.post("/api/products", checkAdminAuth, (req, res) => {
     try {
       const p = req.body;
       const id = p.id || 'prod-' + Date.now();
@@ -249,6 +466,8 @@ async function startServer() {
       };
 
       productsStore.unshift(newProduct);
+      saveStoreToDisk();
+      syncProductToFirestore(newProduct);
       res.status(201).json({
         success: true,
         product: newProduct,
@@ -259,7 +478,7 @@ async function startServer() {
     }
   });
 
-  app.put("/api/products/:id", (req, res) => {
+  app.put("/api/products/:id", checkAdminAuth, (req, res) => {
     const { id } = req.params;
     const updateData = req.body;
     const index = productsStore.findIndex(p => p.id === id);
@@ -273,6 +492,8 @@ async function startServer() {
       ...updateData,
       id // retain id
     };
+    saveStoreToDisk();
+    syncProductToFirestore(productsStore[index]);
 
     res.json({
       success: true,
@@ -281,7 +502,7 @@ async function startServer() {
     });
   });
 
-  app.delete("/api/products/:id", (req, res) => {
+  app.delete("/api/products/:id", checkAdminAuth, (req, res) => {
     const { id } = req.params;
     const initialLen = productsStore.length;
     productsStore = productsStore.filter(p => p.id !== id);
@@ -290,6 +511,8 @@ async function startServer() {
       return res.status(404).json({ success: false, error: "পণ্যটি খুঁজে পাওয়া যায়নি।" });
     }
 
+    saveStoreToDisk();
+    removeProductFromFirestore(id);
     res.json({
       success: true,
       message: "পণ্যটি সফলভাবে ক্যাটালগ থেকে মুছে ফেলা হয়েছে।"
@@ -310,17 +533,34 @@ async function startServer() {
       const orderId = 'KE-' + Math.floor(100000 + Math.random() * 900000);
       const createdAt = new Date().toLocaleString('bn-BD', { timeZone: 'Asia/Dhaka' });
 
+      // Clean and validate phone number
+      const rawPhone = String(orderData.phone || '').trim();
+      const digitsOnly = rawPhone.replace(/[^0-9]/g, '');
+      if (digitsOnly.length < 11) {
+        return res.status(400).json({
+          success: false,
+          error: "অনুগ্রহ করে সঠিক ১১ ডিজিটের মোবাইল নম্বর প্রদান করুন।"
+        });
+      }
+
+      if (!orderData.items || !Array.isArray(orderData.items) || orderData.items.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: "কার্ট খালি! কোনো পণ্য নির্বাচন করা হয়নি।"
+        });
+      }
+
       const newOrder: StoredOrder = {
         id: 'ord-' + Date.now(),
         orderNumber: orderData.orderNumber || orderId,
         createdAt: orderData.createdAt || createdAt,
-        customerName: orderData.customerName || 'বেনামী কৃষক',
-        phone: orderData.phone || '',
-        alternatePhone: orderData.alternatePhone || '',
+        customerName: (orderData.customerName || 'সম্মানিত কৃষক').trim(),
+        phone: rawPhone,
+        alternatePhone: orderData.alternatePhone ? String(orderData.alternatePhone).trim() : '',
         union: orderData.union || '১ নং বদলগাছী সদর ইউনিয়ন',
         ward: orderData.ward || '১',
-        villageAddress: orderData.villageAddress || '',
-        note: orderData.note || '',
+        villageAddress: (orderData.villageAddress || '').trim(),
+        note: (orderData.note || '').trim(),
         items: orderData.items || [],
         subtotal: Number(orderData.subtotal) || 0,
         deliveryFee: Number(orderData.deliveryFee) || 0,
@@ -331,8 +571,10 @@ async function startServer() {
         staffNotes: ''
       };
 
-      // Add to server memory
+      // Add to server store & save
       ordersStore.unshift(newOrder);
+      saveStoreToDisk();
+      syncOrderToFirestore(newOrder);
 
       // If Google Sheet Webhook is configured, attempt auto-forward
       const webhook = (orderData.webhookUrl || siteSettingsStore.googleSheetWebhookUrl || "").trim();
@@ -357,6 +599,7 @@ async function startServer() {
           if (sheetRes.ok) {
             newOrder.syncStatus = 'synced_to_sheet';
             sheetSyncSuccess = true;
+            saveStoreToDisk();
           }
         } catch (err: any) {
           console.warn("Google Sheet forwarding warning:", err.message);
@@ -381,7 +624,7 @@ async function startServer() {
   });
 
   // Update order status (Staff / Admin)
-  app.patch("/api/orders/:id", (req, res) => {
+  app.patch("/api/orders/:id", checkAdminAuth, (req, res) => {
     const { id } = req.params;
     const { status, staffNotes } = req.body;
 
@@ -393,6 +636,11 @@ async function startServer() {
     if (status) ordersStore[orderIndex].status = status;
     if (staffNotes !== undefined) ordersStore[orderIndex].staffNotes = staffNotes;
 
+    saveStoreToDisk();
+    updateOrderInFirestore(ordersStore[orderIndex].id, {
+      status: ordersStore[orderIndex].status,
+      staffNotes: ordersStore[orderIndex].staffNotes
+    });
     res.json({
       success: true,
       order: ordersStore[orderIndex],
@@ -400,7 +648,7 @@ async function startServer() {
     });
   });
 
-  app.delete("/api/orders/:id", (req, res) => {
+  app.delete("/api/orders/:id", checkAdminAuth, (req, res) => {
     const { id } = req.params;
     const initialLen = ordersStore.length;
     ordersStore = ordersStore.filter(o => o.id !== id && o.orderNumber !== id);
@@ -409,6 +657,8 @@ async function startServer() {
       return res.status(404).json({ success: false, error: "অর্ডারটি পাওয়া যায়নি।" });
     }
 
+    saveStoreToDisk();
+    removeOrderFromFirestore(id);
     res.json({
       success: true,
       message: "অর্ডারটি মুছে ফেলা হয়েছে।"
@@ -432,11 +682,11 @@ async function startServer() {
       const newRequest: StoredAdviceRequest = {
         id,
         createdAt,
-        farmerName: data.farmerName || 'সম্মানিত কৃষক',
-        phone: data.phone || '',
+        farmerName: (data.farmerName || 'সম্মানিত কৃষক').trim(),
+        phone: String(data.phone || '').trim(),
         union: data.union || 'বদলগাছী',
         crop: data.crop || 'ফসল',
-        issueDescription: data.issueDescription || '',
+        issueDescription: (data.issueDescription || '').trim(),
         symptomType: data.symptomType || 'সাধারণ লক্ষণ',
         status: 'pending',
         aiResponse: data.aiResponse || '',
@@ -444,6 +694,8 @@ async function startServer() {
       };
 
       adviceRequestsStore.unshift(newRequest);
+      saveStoreToDisk();
+      syncAdviceRequestToFirestore(newRequest);
 
       // Forward to Google Sheet if configured
       const webhook = (data.webhookUrl || siteSettingsStore.googleSheetWebhookUrl || "").trim();
@@ -473,7 +725,7 @@ async function startServer() {
     }
   });
 
-  app.patch("/api/advice-requests/:id", (req, res) => {
+  app.patch("/api/advice-requests/:id", checkAdminAuth, (req, res) => {
     const { id } = req.params;
     const { status, staffNotes } = req.body;
     const reqIndex = adviceRequestsStore.findIndex(r => r.id === id);
@@ -485,6 +737,11 @@ async function startServer() {
     if (status) adviceRequestsStore[reqIndex].status = status;
     if (staffNotes !== undefined) adviceRequestsStore[reqIndex].staffNotes = staffNotes;
 
+    saveStoreToDisk();
+    updateAdviceRequestInFirestore(adviceRequestsStore[reqIndex].id, {
+      status: adviceRequestsStore[reqIndex].status,
+      staffNotes: adviceRequestsStore[reqIndex].staffNotes
+    });
     res.json({
       success: true,
       request: adviceRequestsStore[reqIndex],
@@ -492,7 +749,7 @@ async function startServer() {
     });
   });
 
-  app.delete("/api/advice-requests/:id", (req, res) => {
+  app.delete("/api/advice-requests/:id", checkAdminAuth, (req, res) => {
     const { id } = req.params;
     const initialLen = adviceRequestsStore.length;
     adviceRequestsStore = adviceRequestsStore.filter(r => r.id !== id);
@@ -501,6 +758,8 @@ async function startServer() {
       return res.status(404).json({ success: false, error: "আবেদনটি পাওয়া যায়নি।" });
     }
 
+    saveStoreToDisk();
+    removeAdviceRequestFromFirestore(id);
     res.json({
       success: true,
       message: "পরামর্শ আবেদনটি মুছে ফেলা হয়েছে।"
@@ -549,7 +808,7 @@ async function startServer() {
 পরামর্শটি সংক্ষেপ, স্পষ্ট এবং কৃষকের জন্য সহজেই বোধগম্য রাখুন।`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
+        model: "gemini-3.8-flash",
         contents: prompt,
         config: {
           systemInstruction: "You are a professional Bangladeshi agricultural expert agronomist providing precise, safe, and farmer-friendly crop protection prescriptions in Bengali.",

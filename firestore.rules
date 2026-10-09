@@ -1,0 +1,91 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default Deny All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == 'rstsbd@gmail.com' && request.auth.token.email_verified == true) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['id', 'orderNumber', 'customerName', 'phone', 'union', 'villageAddress', 'grandTotal', 'status'])
+        && data.id is string && data.id.size() <= 128
+        && data.orderNumber is string && data.orderNumber.size() <= 64
+        && data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 150
+        && data.phone is string && data.phone.size() >= 10 && data.phone.size() <= 25
+        && data.union is string && data.union.size() <= 100
+        && data.villageAddress is string && data.villageAddress.size() <= 500
+        && data.grandTotal is number && data.grandTotal >= 0
+        && data.status in ['pending_call', 'confirmed', 'in_transit', 'delivered', 'cancelled']
+        && data.status == 'pending_call';
+    }
+
+    function isValidAdviceRequest(data) {
+      return data.keys().hasAll(['id', 'farmerName', 'phone', 'issueDescription', 'status'])
+        && data.id is string && data.id.size() <= 128
+        && data.farmerName is string && data.farmerName.size() >= 2 && data.farmerName.size() <= 150
+        && data.phone is string && data.phone.size() >= 10 && data.phone.size() <= 25
+        && data.issueDescription is string && data.issueDescription.size() >= 5 && data.issueDescription.size() <= 1000
+        && data.status in ['pending', 'consulted', 'resolved']
+        && data.status == 'pending';
+    }
+
+    // Products collection: Public readable catalog, admin editable
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(productId);
+    }
+
+    // Orders collection: Public creation with strict validation, admin full access
+    match /orders/{orderId} {
+      allow create: if isValidId(orderId) && isValidOrder(incoming());
+      allow read, update, delete: if isAdmin() && isValidId(orderId);
+    }
+
+    // Advice Requests collection: Public farmer advisory creation, admin full access
+    match /advice_requests/{requestId} {
+      allow create: if isValidId(requestId) && isValidAdviceRequest(incoming());
+      allow read, update, delete: if isAdmin() && isValidId(requestId);
+    }
+
+    // Site settings: Public readable, admin writeable
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(settingId);
+    }
+
+    // Connection verification document
+    match /test/{testId} {
+      allow read: if true;
+    }
+
+    // Admins metadata collection
+    match /admins/{adminId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

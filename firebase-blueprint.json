@@ -1,0 +1,109 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Agricultural product in catalog for Khan Enterprise Badalgachi",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "nameBn": { "type": "string", "maxLength": 200 },
+        "nameEn": { "type": "string", "maxLength": 200 },
+        "category": { "type": "string", "enum": ["pesticide", "fertilizer", "seed", "equipment", "organic"] },
+        "categoryBn": { "type": "string", "maxLength": 100 },
+        "brand": { "type": "string", "maxLength": 150 },
+        "packSize": { "type": "string", "maxLength": 100 },
+        "price": { "type": "number" },
+        "originalPrice": { "type": "number" },
+        "inStock": { "type": "boolean" },
+        "stockCount": { "type": "number" },
+        "rating": { "type": "number" },
+        "reviewsCount": { "type": "number" },
+        "image": { "type": "string", "maxLength": 1000 },
+        "shortDescBn": { "type": "string", "maxLength": 500 },
+        "fullDescBn": { "type": "string", "maxLength": 3000 },
+        "usageGuideBn": { "type": "string", "maxLength": 3000 },
+        "chemicalComposition": { "type": "string", "maxLength": 500 },
+        "safetyWarningsBn": { "type": "string", "maxLength": 2000 },
+        "featured": { "type": "boolean" },
+        "badge": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "nameBn", "category", "price", "packSize"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Farmer agro products home delivery order in Badalgachi Upazila",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "orderNumber": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "customerName": { "type": "string", "maxLength": 150 },
+        "phone": { "type": "string", "maxLength": 25 },
+        "alternatePhone": { "type": "string", "maxLength": 25 },
+        "union": { "type": "string", "maxLength": 100 },
+        "ward": { "type": "string", "maxLength": 50 },
+        "villageAddress": { "type": "string", "maxLength": 500 },
+        "note": { "type": "string", "maxLength": 500 },
+        "subtotal": { "type": "number" },
+        "deliveryFee": { "type": "number" },
+        "grandTotal": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["cash_on_delivery"] },
+        "status": { "type": "string", "enum": ["pending_call", "confirmed", "in_transit", "delivered", "cancelled"] },
+        "syncStatus": { "type": "string", "enum": ["synced_to_sheet", "local_only", "error"] },
+        "staffNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["id", "orderNumber", "customerName", "phone", "union", "villageAddress", "grandTotal", "status"]
+    },
+    "AdviceRequest": {
+      "title": "AdviceRequest",
+      "description": "Farmer agricultural crop advisory inquiry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "farmerName": { "type": "string", "maxLength": 150 },
+        "phone": { "type": "string", "maxLength": 25 },
+        "union": { "type": "string", "maxLength": 100 },
+        "crop": { "type": "string", "maxLength": 100 },
+        "issueDescription": { "type": "string", "maxLength": 1000 },
+        "symptomType": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["pending", "consulted", "resolved"] },
+        "aiResponse": { "type": "string", "maxLength": 3000 }
+      },
+      "required": ["id", "farmerName", "phone", "issueDescription", "status"]
+    },
+    "SiteSettings": {
+      "title": "SiteSettings",
+      "description": "Global enterprise contact and configuration settings",
+      "type": "object",
+      "properties": {
+        "hotline": { "type": "string", "maxLength": 50 },
+        "whatsapp": { "type": "string", "maxLength": 50 },
+        "shopAddress": { "type": "string", "maxLength": 300 },
+        "announcementNotice": { "type": "string", "maxLength": 500 },
+        "noticeEnabled": { "type": "boolean" },
+        "googleSheetWebhookUrl": { "type": "string", "maxLength": 1000 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["hotline", "whatsapp", "shopAddress"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Product catalog collection"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Farmer purchase and delivery orders"
+    },
+    "/advice_requests/{requestId}": {
+      "schema": "AdviceRequest",
+      "description": "Agricultural crop disease advice requests"
+    },
+    "/settings/{settingId}": {
+      "schema": "SiteSettings",
+      "description": "Global store settings and banner notice configuration"
+    }
+  }
+}
