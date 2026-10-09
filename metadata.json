@@ -1,0 +1,6 @@
+{
+  "name": "খান এন্টারপ্রাইজ - বদলগাছী কৃষি সেবা",
+  "description": "বদলগাছী উপজেলার ৮টি ইউনিয়নের কৃষকদের জন্য আসল কৃষি উপকরণ (কীটনাশক, সার, বীজ) অনলাইন অর্ডার, হোম ডেলিভারি ও ফ্রী কৃষি পরামর্শ পোর্টাল।",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
