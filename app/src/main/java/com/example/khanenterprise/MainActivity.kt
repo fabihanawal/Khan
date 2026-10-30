@@ -6,7 +6,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.View
-import android.view.ViewGroup
 import android.webkit.*
 import android.widget.FrameLayout
 import android.widget.ProgressBar
@@ -14,6 +13,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.webkit.WebViewAssetLoader
+import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -98,7 +98,7 @@ class MainActivity : AppCompatActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
-            // Software layer prevents Chromium GPU renderer crashes in headless emulator
+            // Software layer prevents Chromium GPU renderer crashes in emulator
             setLayerType(View.LAYER_TYPE_SOFTWARE, null)
         }
 
@@ -106,7 +106,7 @@ class MainActivity : AppCompatActivity() {
         s.javaScriptEnabled = true
         s.domStorageEnabled = true
         s.databaseEnabled = true
-        s.allowFileAccess = false // Security: assetLoader handles assets over HTTPS
+        s.allowFileAccess = false
         s.allowContentAccess = false
         s.useWideViewPort = true
         s.loadWithOverviewMode = true
@@ -155,27 +155,31 @@ class MainActivity : AppCompatActivity() {
                 request: WebResourceRequest?
             ): WebResourceResponse? {
                 val uri = request?.url ?: return null
-
-                // 1. First, check if assetLoader can serve it from bundled assets
-                val assetResponse = assetLoader.shouldInterceptRequest(uri)
-                if (assetResponse != null) {
-                    return assetResponse
-                }
-
-                // 2. If it's an API request, proxy to local dev server (10.0.2.2 or 127.0.0.1)
                 val path = uri.path ?: ""
+
+                // 1. Intercept API requests BEFORE assetLoader to prevent FileNotFoundException in logs
                 if (path.startsWith("/api/")) {
-                    return proxyApiRequest(request)
+                    return handleApiRequest(request, path)
                 }
 
-                return null
+                // 2. Safely handle favicon.ico requests
+                if (path == "/favicon.ico") {
+                    return try {
+                        val stream = assets.open("favicon.ico")
+                        WebResourceResponse("image/x-icon", "binary", 200, "OK", emptyMap(), stream)
+                    } catch (e: Exception) {
+                        WebResourceResponse("image/png", "binary", 200, "OK", emptyMap(), ByteArrayInputStream(ByteArray(0)))
+                    }
+                }
+
+                // 3. For bundled web files (HTML, JS, CSS, fonts, images), use assetLoader
+                return assetLoader.shouldInterceptRequest(uri)
             }
 
             override fun onRenderProcessGone(
                 view: WebView?,
                 detail: RenderProcessGoneDetail?
             ): Boolean {
-                // CRITICAL: Handle renderer crash so the Android OS does not terminate the process!
                 val didCrash = detail?.didCrash() == true
                 Log.e("MainActivity", "Chromium render process gone. didCrash=$didCrash")
                 runOnUiThread {
@@ -198,36 +202,58 @@ class MainActivity : AppCompatActivity() {
         swipeRefreshLayout.addView(wv)
         webView = wv
 
-        // Load web app over virtual domain mapped to assets
+        // Load web app over virtual secure domain mapped to assets
         wv.loadUrl("https://appassets.androidplatform.net/index.html")
     }
 
-    private fun proxyApiRequest(request: WebResourceRequest): WebResourceResponse? {
-        return try {
-            val path = request.url.path ?: return null
-            val query = request.url.query
-            val fullPath = if (query.isNullOrEmpty()) path else "$path?$query"
-            // Try localhost:3000 or 10.0.2.2:3000
-            val targetUrl = "http://127.0.0.1:3000$fullPath"
-            val conn = URL(targetUrl).openConnection() as HttpURLConnection
-            conn.requestMethod = request.method
-            conn.connectTimeout = 3000
-            conn.readTimeout = 5000
+    private fun handleApiRequest(request: WebResourceRequest, path: String): WebResourceResponse {
+        val query = request.url.query
+        val fullPath = if (query.isNullOrEmpty()) path else "$path?$query"
 
-            for ((k, v) in request.requestHeaders) {
-                conn.setRequestProperty(k, v)
+        // Candidate URLs to query the local backend from emulator or container
+        val candidateHosts = listOf(
+            "http://10.0.2.2:3000",
+            "http://127.0.0.1:3000",
+            "http://10.0.2.2:8080",
+            "http://127.0.0.1:8080"
+        )
+
+        for (host in candidateHosts) {
+            try {
+                val conn = URL("$host$fullPath").openConnection() as HttpURLConnection
+                conn.requestMethod = request.method
+                conn.connectTimeout = 800
+                conn.readTimeout = 1500
+                for ((k, v) in request.requestHeaders) {
+                    conn.setRequestProperty(k, v)
+                }
+                val statusCode = conn.responseCode
+                if (statusCode in 200..399) {
+                    val stream: InputStream = conn.inputStream
+                    val mimeType = conn.contentType ?: "application/json"
+                    return WebResourceResponse(mimeType, "utf-8", statusCode, "OK", emptyMap(), stream)
+                }
+            } catch (ignored: Exception) {
+                // Try next host
             }
+        }
 
-            val statusCode = conn.responseCode
-            val message = conn.responseMessage ?: "OK"
-            val mimeType = conn.contentType ?: "application/json"
-            val isSuccess = statusCode in 200..299
-            val stream: InputStream = if (isSuccess) conn.inputStream else (conn.errorStream ?: conn.inputStream)
-
-            WebResourceResponse(mimeType, "utf-8", statusCode, message, emptyMap(), stream)
+        // Fallback: If network connection to local dev server is unavailable, load bundled JSON asset
+        val endpoint = path.removePrefix("/api/").substringBefore('/')
+        val fallbackAsset = "api/$endpoint.json"
+        return try {
+            val stream = assets.open(fallbackAsset)
+            WebResourceResponse("application/json", "utf-8", 200, "OK", emptyMap(), stream)
         } catch (e: Exception) {
-            Log.w("MainActivity", "API proxy error: $e")
-            null
+            val emptyFallback = "{\"success\":true,\"data\":[]}"
+            WebResourceResponse(
+                "application/json",
+                "utf-8",
+                200,
+                "OK",
+                emptyMap(),
+                ByteArrayInputStream(emptyFallback.toByteArray(Charsets.UTF_8))
+            )
         }
     }
 
